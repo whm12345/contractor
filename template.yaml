@@ -1,0 +1,240 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Contractor Trial — Campfire Invoice Query
+
+Globals:
+  Function:
+    Timeout: 10
+    Runtime: nodejs20.x
+    MemorySize: 256
+    Tracing: Active
+    DeadLetterConfig:
+      TargetArn: !GetAtt InvoiceDLQ.Arn
+
+Resources:
+  # ─── DynamoDB Table ──────────────────────────────────────────────────
+  InvoiceTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: CampfireInvoices
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: sk
+          AttributeType: S
+        - AttributeName: gsi1pk
+          AttributeType: S
+        - AttributeName: gsi1sk
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: InvoiceByIdGSI
+          KeySchema:
+            - AttributeName: gsi1pk
+              KeyType: HASH
+            - AttributeName: gsi1sk
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+          Tags:
+            - Key: Purpose
+              Value: future-invoice-id-lookup
+      BillingMode: PAY_PER_REQUEST
+      DeletionProtectionEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+      Tags:
+        - Key: Environment
+          Value: prod
+
+  # ─── DLQ Queue ───────────────────────────────────────────────────────
+  InvoiceDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      MessageRetentionPeriod: 1209600
+
+  # ─── API Access Logs ─────────────────────────────────────────────────
+  InvoiceApiLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/apigateway/${InvoiceHttpApi}"
+      RetentionInDays: 30
+
+  # ─── HttpApi with CORS + Throttling ──────────────────────────────────
+  InvoiceHttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      AccessLogSetting:
+        DestinationArn: !GetAtt InvoiceApiLogs.Arn
+        Format: '{"requestId":"$request_id","ip":"$context.identity.sourceIp","requestTime":"$context.requestTime","httpMethod":"$context.httpMethod","resourcePath":"$context.resourcePath","status":"$context.status","protocol":"$context.protocol","responseLength":"$context.responseLength"}'
+      StageName: prod
+      Description: Campfire Invoice Query API
+      CorsConfiguration:
+        AllowOrigins:
+          - '*'
+        AllowMethods:
+          - GET
+          - OPTIONS
+        MaxAge: 86400
+      RouteSettings:
+        - HttpMethod: '*'
+          StageVariables: {}
+          Throttling:
+            BurstLimit: 1000
+            RateLimit: 5000
+
+  # ─── Lambda Function ─────────────────────────────────────────────────
+  InvoiceFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: CampfireInvoiceQuery
+      Handler: handler.query
+      CodeUri: ./
+      ReservedConcurrentExecutions: 500
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref InvoiceTable
+      Events:
+        InvoiceApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref InvoiceHttpApi
+            Path: /invoices
+            Method: GET
+        HealthCheck:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref InvoiceHttpApi
+            Path: /health
+            Method: GET
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref InvoiceTable
+
+Outputs:
+  ApiUrl:
+    Description: "API Gateway endpoint URL"
+    Value: !Sub "https://${InvoiceHttpApi}.execute-api.${AWS::Region}.amazonaws.com/prod/invoices"
+  FunctionArn:
+    Description: "Lambda function ARN"
+    Value: !GetAtt InvoiceFunction.Arn
+
+  # ─── SNS Topic for Alerts ────────────────────────────────────────────
+  AlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      DisplayName: CampfireInvoiceAlerts
+
+  # ─── CloudWatch Alarms ─────────────────────────────────────────────
+
+  # Lambda errors — alert on any error
+  ALM_InvoiceFunctionErrors:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: "Alert on any Lambda error"
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref InvoiceFunction
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !Ref AlertTopic
+
+  # Lambda throttling
+  ALM_InvoiceFunctionThrottles:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: "Alert on Lambda throttling"
+      Namespace: AWS/Lambda
+      MetricName: Throttles
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref InvoiceFunction
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !Ref AlertTopic
+
+  # Lambda P99 latency
+  ALM_InvoiceFunctionLatency:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: "Alert on high Lambda latency (P99 > 5s)"
+      Namespace: AWS/Lambda
+      MetricName: Duration
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref InvoiceFunction
+      Statistic: p99
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 5000
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !Ref AlertTopic
+
+  # API Gateway 5xx errors
+  ALM_InvoiceApi5xx:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: "Alert on API 5xx errors"
+      Namespace: AWS/ApiGateway
+      MetricName: 5XXError
+      Dimensions:
+        - Name: ApiName
+          Value: !Ref InvoiceHttpApi
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !Ref AlertTopic
+
+  # DynamoDB throttling (auto-scaled PAY_PER_REQUEST)
+  ALM_InvoiceDynamoDBThrottles:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: "Alert on DynamoDB throttling events"
+      Namespace: AWS/DynamoDB
+      MetricName: SystemThrottlingCheckFailure
+      Dimensions:
+        - Name: TableName
+          Value: !Ref InvoiceTable
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !Ref AlertTopic
+
+  # DLQ message count
+  ALM_InvoiceDLQDepth:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: "Alert when Lambda failures accumulate in DLQ"
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt InvoiceDLQ.QueueName
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !Ref AlertTopic
