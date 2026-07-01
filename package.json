@@ -6,6 +6,14 @@
   "engines": {
     "node": ">=20.0.0"
   },
+  "scripts": {
+    "build": "sam build",
+    "deploy": "sam deploy --guided",
+    "deploy:ci": "sam deploy --no-confirm-changeset --no-fail-on-empty-changeset",
+    "clean": "rm -rf .aws-sam .sam node_modules",
+    "validate": "sam validate",
+    "invoke:local": "sam local invoke InvoiceFunction -e events/test.json"
+  },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.700.0",
     "@aws-sdk/lib-dynamodb": "^3.700.0"

@@ -157,9 +157,9 @@ aws dynamodb put-item --table-name CampfireInvoices --item '{
                    │  Campfire    │  单表设计, 加密, 删除保护
                    │  Invoices    │
                    └──────────────┘
-                          │ 失败时
+                          │ 未来异步事件源失败时
                    ┌──────▼───────┐
-                   │   SQS DLQ    │  保留14天
+                   │   SQS DLQ    │  保留14天（异步事件预留）
                    └──────────────┘
 ```
 
@@ -168,10 +168,10 @@ aws dynamodb put-item --table-name CampfireInvoices --item '{
 | 资源 | 说明 |
 |------|------|
 | `InvoiceHttpApi` | HTTP API (ApiGateway V2)，开启 CORS（允许 `*` 来源，GET + OPTIONS），限流 5000 req/s 突发 1000 |
-| `InvoiceFunction` | Lambda，nodejs20.x，256MB，保留并发 500，失败投递到 SQS DLQ，开启 X-Ray 主动追踪 |
+| `InvoiceFunction` | Lambda，nodejs20.x，256MB，保留并发 500，开启 X-Ray 主动追踪。由 API Gateway 同步调用，失败直接返回 5xx |
 | `InvoiceTable` | DynamoDB 表，启用 SSE 加密和删除保护，PAY_PER_REQUEST 计费 |
 | `InvoiceApiLogs` | API Gateway 访问日志，SSE 格式，保留 30 天 |
-| `InvoiceDLQ` | SQS 死信队列，消息保留 14 天 |
+| `InvoiceDLQ` | SQS 死信队列（为未来异步事件源预留），消息保留 14 天 |
 
 ### 监控告警（全部通过 SNS 分发）
 
@@ -180,8 +180,8 @@ aws dynamodb put-item --table-name CampfireInvoices --item '{
 | Lambda 错误 | `Errors` | > 0 | 1 分钟 |
 | Lambda 限流 | `Throttles` | > 0 | 1 分钟 |
 | Lambda P99 延迟 | `Duration` (p99) | > 5s | 5 分钟 |
-| API 5xx 错误 | `5XXError` | > 0 | 1 分钟 |
-| DynamoDB 限流 | `SystemThrottlingCheckFailure` | > 0 | 1 分钟 |
+| API 5xx 错误 | `5xx` | > 0 | 1 分钟 |
+| DynamoDB 限流 | `ThrottledRequests` | > 0 | 1 分钟 |
 | DLQ 积压 | `ApproximateNumberOfMessagesVisible` | > 0 | 5 分钟 |
 
 所有告警动作指向同一 SNS Topic `CampfireInvoiceAlerts`，可绑定邮件/Slack/Webhook 等订阅。

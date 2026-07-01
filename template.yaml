@@ -50,8 +50,13 @@ Resources:
       Tags:
         - Key: Environment
           Value: prod
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
 
   # ─── DLQ Queue ───────────────────────────────────────────────────────
+  # 注意：DeadLetterConfig 仅对异步调用（SNS、EventBridge、S3 事件等）生效。
+  # 当前 Lambda 由 API Gateway HTTP API 同步调用，失败时 API Gateway 直接返回 5xx，
+  # 不会投递到 DLQ。保留 DLQ 以备未来添加异步事件源。
   InvoiceDLQ:
     Type: AWS::SQS::Queue
     Properties:
@@ -138,6 +143,7 @@ Resources:
       EvaluationPeriods: 1
       Threshold: 0
       ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
       AlarmActions:
         - !Ref AlertTopic
 
@@ -156,6 +162,7 @@ Resources:
       EvaluationPeriods: 1
       Threshold: 0
       ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
       AlarmActions:
         - !Ref AlertTopic
 
@@ -174,6 +181,7 @@ Resources:
       EvaluationPeriods: 1
       Threshold: 5000
       ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
       AlarmActions:
         - !Ref AlertTopic
 
@@ -194,6 +202,7 @@ Resources:
       EvaluationPeriods: 1
       Threshold: 0
       ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
       AlarmActions:
         - !Ref AlertTopic
 
@@ -212,6 +221,7 @@ Resources:
       EvaluationPeriods: 1
       Threshold: 0
       ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
       AlarmActions:
         - !Ref AlertTopic
 
@@ -230,6 +240,7 @@ Resources:
       EvaluationPeriods: 1
       Threshold: 0
       ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
       AlarmActions:
         - !Ref AlertTopic
 

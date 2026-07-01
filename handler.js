@@ -43,6 +43,7 @@ function structuredLog(level, message, meta = {}) {
 exports.query = async (event) => {
   // ── Health check ────────────────────────────────────────────────────
   if (event.rawPath === "/health") {
+    if (DEBUG) structuredLog("INFO", "Health check called");
     return json(200, { status: "healthy", timestamp: new Date().toISOString() });
   }
 
@@ -109,6 +110,16 @@ exports.query = async (event) => {
       ? Buffer.from(JSON.stringify(result.LastEvaluatedKey)).toString("base64")
       : undefined;
 
+    if (DEBUG) {
+      structuredLog("INFO", "Query succeeded", {
+        supplierId: sanitizedId,
+        limit,
+        count: invoices.length,
+        hasMore: !!nextToken,
+        requestId: event.requestContext?.requestId,
+      });
+    }
+
     return json(200, {
       supplier_id: sanitizedId,
       count: invoices.length,
@@ -133,8 +144,13 @@ exports.query = async (event) => {
       return json(500, { error: "Database table not available" });
     }
 
-    // General error
-    structuredLog("ERROR", "DynamoDB query failed", { error: err.name, message: err.message, stack: err.stack, correlationId: event.requestContext?.requestId });
+    // General error (only include stack trace when DEBUG is enabled)
+    structuredLog("ERROR", "DynamoDB query failed", {
+      error: err.name,
+      message: err.message,
+      correlationId: event.requestContext?.requestId,
+      ...(DEBUG && { stack: err.stack }),
+    });
     return json(500, {
       error: "Internal server error",
       ...(DEBUG && { detail: err.message }),
