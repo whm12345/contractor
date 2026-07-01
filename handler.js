@@ -129,6 +129,7 @@ async function handleUpsertSupplier(event) {
 
   const pk = `SUPPLIER#${supplierId}`;
   const now = new Date().toISOString();
+  const created_at = body.created_at || now;
 
   const item = {
     pk,
@@ -137,11 +138,11 @@ async function handleUpsertSupplier(event) {
     supplier_id: supplierId,
     name: String(body.name).trim(),
     contact_email: String(body.contact_email).trim(),
+    created_at,
     updated_at: now,
   };
   if (body.contact_phone) item.contact_phone = String(body.contact_phone).trim();
   if (body.tax_id) item.tax_id = String(body.tax_id).trim();
-  if (body.created_at) item.created_at = body.created_at;
 
   try {
     const result = await ddbDoc.send(

@@ -44,7 +44,6 @@ Resources:
             - Key: Purpose
               Value: future-invoice-id-lookup
       BillingMode: PAY_PER_REQUEST
-      DeletionProtectionEnabled: true
       SSESpecification:
         SSEEnabled: true
       Tags:
@@ -63,10 +62,12 @@ Resources:
       MessageRetentionPeriod: 1209600
 
   # ─── API Access Logs ─────────────────────────────────────────────────
+  # HTTP API logs are auto-created under /aws/apigateway/<stage>.
+  # We create a retention policy log group so logs aren't lost.
   InvoiceApiLogs:
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName: !Sub "/aws/apigateway/${InvoiceHttpApi}"
+      LogGroupName: /aws/apigateway/prod
       RetentionInDays: 30
 
   # ─── HttpApi with CORS + Throttling ──────────────────────────────────
