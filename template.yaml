@@ -83,6 +83,9 @@ Resources:
           - '*'
         AllowMethods:
           - GET
+          - POST
+          - PUT
+          - DELETE
           - OPTIONS
         MaxAge: 86400
       RouteSettings:
@@ -97,12 +100,13 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: CampfireInvoiceQuery
-      Handler: handler.query
+      Handler: handler.handler
       CodeUri: ./
       ReservedConcurrentExecutions: 500
       Environment:
         Variables:
           TABLE_NAME: !Ref InvoiceTable
+          SUPPLIER_TABLE_NAME: !Ref InvoiceTable
       Events:
         InvoiceApi:
           Type: HttpApi
@@ -110,15 +114,67 @@ Resources:
             ApiId: !Ref InvoiceHttpApi
             Path: /invoices
             Method: GET
+        CreateInvoice:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref InvoiceHttpApi
+            Path: /invoices
+            Method: POST
+        UpdateInvoice:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref InvoiceHttpApi
+            Path: /invoices
+            Method: PUT
+        DeleteInvoice:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref InvoiceHttpApi
+            Path: /invoices
+            Method: DELETE
         HealthCheck:
           Type: HttpApi
           Properties:
             ApiId: !Ref InvoiceHttpApi
             Path: /health
             Method: GET
+        SupplierCreate:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref InvoiceHttpApi
+            Path: /suppliers
+            Method: POST
       Policies:
-        - DynamoDBReadPolicy:
+        - DynamoDBCrudPolicy:
             TableName: !Ref InvoiceTable
+
+  # ─── Supplier Detail Route (GET /suppliers/{supplier_id}) ──────────────
+  SupplierDetailRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref InvoiceHttpApi
+      RouteKey: GET /suppliers/{supplier_id}
+      Target: !Join
+        - ""
+        - - "integrations/"
+          - !Ref SupplierDetailIntegration
+
+  # ─── Supplier Detail Integration ───────────────────────────────────────
+  SupplierDetailIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref InvoiceHttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${InvoiceFunction.Arn}/invocations"
+      PayloadFormatVersion: "2.0"
+
+  # ─── Supplier Detail Route Response ────────────────────────────────────
+  SupplierDetailRouteResponse:
+    Type: AWS::ApiGatewayV2::RouteResponse
+    Properties:
+      ApiId: !Ref InvoiceHttpApi
+      RouteId: !Ref SupplierDetailRoute
+      RouteResponseKey: "$default"
 
   # ─── SNS Topic for Alerts ────────────────────────────────────────────
   AlertTopic:
