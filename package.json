@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "Campfire ERP Invoice Query — Lambda function to fetch invoices by supplier",
   "private": true,
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.700.0",
     "@aws-sdk/lib-dynamodb": "^3.700.0"

@@ -115,14 +115,6 @@ Resources:
         - DynamoDBReadPolicy:
             TableName: !Ref InvoiceTable
 
-Outputs:
-  ApiUrl:
-    Description: "API Gateway endpoint URL"
-    Value: !Sub "https://${InvoiceHttpApi}.execute-api.${AWS::Region}.amazonaws.com/prod/invoices"
-  FunctionArn:
-    Description: "Lambda function ARN"
-    Value: !GetAtt InvoiceFunction.Arn
-
   # ─── SNS Topic for Alerts ────────────────────────────────────────────
   AlertTopic:
     Type: AWS::SNS::Topic
@@ -185,16 +177,18 @@ Outputs:
       AlarmActions:
         - !Ref AlertTopic
 
-  # API Gateway 5xx errors
+  # API Gateway 5xx errors (HTTP API V2 uses ApiId + lowercase metric names)
   ALM_InvoiceApi5xx:
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmDescription: "Alert on API 5xx errors"
       Namespace: AWS/ApiGateway
-      MetricName: 5XXError
+      MetricName: 5xx
       Dimensions:
-        - Name: ApiName
+        - Name: ApiId
           Value: !Ref InvoiceHttpApi
+        - Name: Stage
+          Value: prod
       Statistic: Sum
       Period: 60
       EvaluationPeriods: 1
@@ -203,13 +197,13 @@ Outputs:
       AlarmActions:
         - !Ref AlertTopic
 
-  # DynamoDB throttling (auto-scaled PAY_PER_REQUEST)
+  # DynamoDB throttling (PAY_PER_REQUEST)
   ALM_InvoiceDynamoDBThrottles:
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmDescription: "Alert on DynamoDB throttling events"
       Namespace: AWS/DynamoDB
-      MetricName: SystemThrottlingCheckFailure
+      MetricName: ThrottledRequests
       Dimensions:
         - Name: TableName
           Value: !Ref InvoiceTable
@@ -238,3 +232,11 @@ Outputs:
       ComparisonOperator: GreaterThanThreshold
       AlarmActions:
         - !Ref AlertTopic
+
+Outputs:
+  ApiUrl:
+    Description: "API Gateway endpoint URL"
+    Value: !Sub "https://${InvoiceHttpApi}.execute-api.${AWS::Region}.amazonaws.com/prod/invoices"
+  FunctionArn:
+    Description: "Lambda function ARN"
+    Value: !GetAtt InvoiceFunction.Arn

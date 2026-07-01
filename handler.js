@@ -20,12 +20,29 @@ function json(statusCode, body, extraHeaders = {}) {
 }
 
 /**
+ * Structured JSON logger. Writes to stdout (INFO) or stderr (WARN/ERROR)
+ * based on the supplied level.
+ */
+function structuredLog(level, message, meta = {}) {
+  const logFn = level === "ERROR" ? console.error : level === "WARN" ? console.warn : console.info;
+  logFn(
+    JSON.stringify({
+      level,
+      service: "CampfireInvoiceQuery",
+      timestamp: new Date().toISOString(),
+      message,
+      ...meta,
+    })
+  );
+}
+
+/**
  * Lambda handler for API Gateway HTTP API (v2 payload format).
  * GET /invoices?supplier_id=xxx&limit=100&next_token=...
  */
 exports.query = async (event) => {
   // ── Health check ────────────────────────────────────────────────────
-  if (event.rawPath === "/health" || event.rawPath === "/healthz") {
+  if (event.rawPath === "/health") {
     return json(200, { status: "healthy", timestamp: new Date().toISOString() });
   }
 
@@ -35,11 +52,13 @@ exports.query = async (event) => {
     return json(400, { error: "Missing required parameter: supplier_id" });
   }
 
-  // Trim whitespace and enforce DynamoDB 400-byte string limit (use UTF-8 byte length for multi-byte chars)
+  // Trim whitespace and enforce DynamoDB 2KB PK limit (safe margin: 360 bytes; "SUPPLIER#" prefix is 9 bytes)
   const sanitizedId = supplierId.trim();
+  if (!sanitizedId) {
+    return json(400, { error: "supplier_id must not be empty" });
+  }
   if (Buffer.byteLength(sanitizedId) > 360) {
-    // 400 byte limit minus "INVOICE#" prefix length
-    return json(400, { error: "supplier_id exceeds maximum length (360 chars)" });
+    return json(400, { error: "supplier_id exceeds maximum byte length (360)" });
   }
 
   const tableName = process.env.TABLE_NAME;
@@ -47,14 +66,14 @@ exports.query = async (event) => {
     return json(500, { error: "Internal server error" });
   }
 
-  const pk = `INVOICE#${sanitizedId}`;
+  const pk = `SUPPLIER#${sanitizedId}`;
 
   // ── Extract pagination parameters ───────────────────────────────────
   const rawLimit = parseInt(event.queryStringParameters?.limit);
-  if (isNaN(rawLimit) || rawLimit < 0 || rawLimit > 1000) {
-    return json(400, { error: "limit must be an integer between 0 and 1000" });
+  if (event.queryStringParameters?.limit !== undefined && (isNaN(rawLimit) || rawLimit < 1 || rawLimit > 1000)) {
+    return json(400, { error: "limit must be an integer between 1 and 1000" });
   }
-  const limit = rawLimit;
+  const limit = event.queryStringParameters?.limit !== undefined ? rawLimit : 100;
 
   let exclusiveStartKey;
   if (event.queryStringParameters?.next_token) {
@@ -65,19 +84,6 @@ exports.query = async (event) => {
     } catch (err) {
       return json(400, { error: "Invalid next_token: must be a valid base64-encoded DynamoDB key" });
     }
-  }
-
-  // ── Structured logging helper ─────────────────────────────────────────
-  function structuredLog(level, message, meta = {}) {
-    console.error(
-      JSON.stringify({
-        level,
-        service: "CampfireInvoiceQuery",
-        timestamp: new Date().toISOString(),
-        message,
-        ...meta,
-      })
-    );
   }
 
   // ── Query DynamoDB ──────────────────────────────────────────────────
